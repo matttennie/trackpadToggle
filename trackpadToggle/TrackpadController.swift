@@ -18,11 +18,10 @@
 
 import Cocoa
 import CoreGraphics
-import IOKit
 
 /// Controls trackpad enable/disable state using CGEventTap.
 /// This approach intercepts trackpad events at the Core Graphics level,
-/// blocking them before they reach applications while allowing external mice.
+/// blocking them before they reach applications.
 final class TrackpadController {
 
     /// Shared singleton instance
@@ -40,72 +39,7 @@ final class TrackpadController {
     /// Callback invoked when trackpad state changes
     var onStateChange: ((Bool) -> Void)?
 
-    /// Timer for retrying after permission grant
-    private var permissionCheckTimer: Timer?
-
-    /// Cached set of internal trackpad sender IDs (vendor/product combos)
-    private static var internalTrackpadSenderIDs: Set<UInt64> = []
-
-    /// Flag to track if we've initialized trackpad detection
-    private static var hasInitializedTrackpadDetection = false
-
-    private init() {
-        Self.initializeTrackpadDetection()
-    }
-
-    /// Initialize detection of internal trackpad hardware
-    private static func initializeTrackpadDetection() {
-        guard !hasInitializedTrackpadDetection else { return }
-        hasInitializedTrackpadDetection = true
-
-        // Find internal trackpad devices via IOKit
-        let matchingDict = IOServiceMatching("AppleMultitouchDevice")
-        var iterator: io_iterator_t = 0
-
-        let result = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator)
-        guard result == KERN_SUCCESS else {
-            NSLog("TrackpadController: Failed to get matching services for trackpad detection")
-            return
-        }
-
-        defer { IOObjectRelease(iterator) }
-
-        var service = IOIteratorNext(iterator)
-        while service != 0 {
-            // Get device properties
-            var properties: Unmanaged<CFMutableDictionary>?
-            if IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
-               let props = properties?.takeRetainedValue() as? [String: Any] {
-
-                // Check if this is an internal device (built-in trackpad)
-                let isInternal = props["Built-In"] as? Bool ?? false
-                let productName = props["Product"] as? String ?? ""
-
-                if isInternal || productName.lowercased().contains("trackpad") {
-                    // Get vendor and product ID to create a sender ID
-                    let vendorID = props["idVendor"] as? Int ?? 0
-                    let productID = props["idProduct"] as? Int ?? 0
-
-                    if vendorID != 0 || productID != 0 {
-                        let senderID = UInt64(vendorID) << 32 | UInt64(productID)
-                        internalTrackpadSenderIDs.insert(senderID)
-                        NSLog("TrackpadController: Registered trackpad - \(productName)")
-                    }
-                }
-            }
-            IOObjectRelease(service)
-            service = IOIteratorNext(iterator)
-        }
-
-        // If no trackpads found via IOKit, use Apple's known trackpad vendor ID
-        if internalTrackpadSenderIDs.isEmpty {
-            // Apple's vendor ID is 0x05AC (1452), common trackpad product IDs
-            let appleVendor: UInt64 = 0x05AC
-            internalTrackpadSenderIDs.insert(appleVendor << 32 | 0x0274) // Magic Trackpad
-            internalTrackpadSenderIDs.insert(appleVendor << 32 | 0x0265) // Built-in trackpad
-            NSLog("TrackpadController: Using default Apple trackpad IDs")
-        }
-    }
+    private init() {}
 
     /// Check if accessibility permissions are granted
     var hasAccessibilityPermission: Bool {
@@ -134,7 +68,6 @@ final class TrackpadController {
         guard !isTrackpadEnabled else { return }
 
         stopEventTap()
-        stopPermissionCheckTimer()
         isTrackpadEnabled = true
         onStateChange?(true)
     }
@@ -145,7 +78,6 @@ final class TrackpadController {
 
         if !hasAccessibilityPermission {
             requestAccessibilityPermission()
-            startPermissionCheckTimer()
             return
         }
 
@@ -153,27 +85,6 @@ final class TrackpadController {
             isTrackpadEnabled = false
             onStateChange?(false)
         }
-    }
-
-    /// Start timer to check for permission grant and retry
-    private func startPermissionCheckTimer() {
-        stopPermissionCheckTimer()
-        permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            if self.hasAccessibilityPermission {
-                self.stopPermissionCheckTimer()
-                // Auto-retry disable now that we have permission
-                if self.isTrackpadEnabled {
-                    self.disableTrackpad()
-                }
-            }
-        }
-    }
-
-    /// Stop the permission check timer
-    private func stopPermissionCheckTimer() {
-        permissionCheckTimer?.invalidate()
-        permissionCheckTimer = nil
     }
 
     /// Start the event tap to block trackpad events
@@ -232,58 +143,7 @@ final class TrackpadController {
         NSLog("TrackpadController: Event tap stopped, trackpad enabled")
     }
 
-    /// Check if an event originated from the internal trackpad vs external mouse
-    /// Returns true if the event should be blocked (is from trackpad)
-    private static func isTrackpadEvent(_ event: CGEvent) -> Bool {
-        let eventType = event.type
-
-        // Method 1: Check scroll wheel characteristics
-        // Trackpad scrolls have phases (gesture) and are continuous
-        // Mouse scrolls are discrete without phases
-        if eventType == .scrollWheel {
-            let scrollPhase = event.getIntegerValueField(.scrollWheelEventScrollPhase)
-            let momentumPhase = event.getIntegerValueField(.scrollWheelEventMomentumPhase)
-            let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous)
-
-            // Any phase or continuous flag = trackpad
-            if scrollPhase != 0 || momentumPhase != 0 || isContinuous != 0 {
-                return true
-            }
-            // Discrete scroll (no phases, not continuous) = mouse, allow through
-            return false
-        }
-
-        // Method 2: Check subtype - subtype 1 indicates tablet/touch events (trackpad)
-        let subtype = event.getIntegerValueField(.mouseEventSubtype)
-        if subtype == 1 {
-            return true
-        }
-
-        // Method 3: Check event source state ID
-        // The built-in trackpad typically has sourceStateID of 0
-        // External USB/Bluetooth mice have non-zero sourceStateID
-        let sourceStateID = event.getIntegerValueField(.eventSourceStateID)
-
-        // For movement and click events, use sourceStateID as primary discriminator
-        // sourceStateID 0 = likely internal trackpad
-        // sourceStateID non-zero = likely external mouse
-        if sourceStateID == 0 {
-            return true
-        }
-
-        // Method 4: Check event source unix process ID
-        // If sourceUnixProcessID is 0, it's a hardware event (could be either)
-        // This is less reliable but can help in edge cases
-        let sourceUnixProcessID = event.getIntegerValueField(.eventSourceUnixProcessID)
-        if sourceUnixProcessID == 0 && sourceStateID == 0 {
-            return true
-        }
-
-        // Default: allow through (external mouse or can't determine)
-        return false
-    }
-
-    /// Event tap callback - blocks trackpad events, allows external mice
+    /// Event tap callback - blocks all intercepted events
     private static let eventTapCallback: CGEventTapCallBack = { _, type, event, refcon in
         // Handle tap disabled by timeout (re-enable it)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -297,14 +157,8 @@ final class TrackpadController {
             return Unmanaged.passUnretained(event)
         }
 
-        // Check if this event is from the trackpad
-        if isTrackpadEvent(event) {
-            // Block trackpad events
-            return nil
-        }
-
-        // Allow external mouse events to pass through
-        return Unmanaged.passUnretained(event)
+        // Block the event by returning nil
+        return nil
     }
 
     deinit {
