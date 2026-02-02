@@ -17,8 +17,10 @@
  */
 
 import Cocoa
+import os.log
 
-@main
+private let logger = Logger(subsystem: "com.trackpadToggle.app", category: "AppDelegate")
+
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Control Strip item identifier
@@ -38,17 +40,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Application Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSLog("AppDelegate: applicationDidFinishLaunching started")
+        logger.notice("applicationDidFinishLaunching started")
+
         setupStatusBarMenu()
-        NSLog("AppDelegate: setupStatusBarMenu completed, statusItem = \(String(describing: statusItem))")
+        logger.notice("setupStatusBarMenu completed, statusItem = \(String(describing: self.statusItem), privacy: .public)")
         setupControlStrip()
         setupTrackpadStateCallback()
 
         // Check accessibility on launch
         if !TrackpadController.shared.hasAccessibilityPermission {
-            NSLog("AppDelegate: Accessibility permission not granted")
+            logger.warning("Accessibility permission not granted")
         }
-        NSLog("AppDelegate: applicationDidFinishLaunching completed")
+        logger.notice("applicationDidFinishLaunching completed")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -65,17 +68,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status Bar Menu
 
     private func setupStatusBarMenu() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // Use variable length to ensure visibility even without icon
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        logger.notice("Created statusItem: \(String(describing: self.statusItem), privacy: .public)")
 
         if let button = statusItem?.button {
-            // Try system image first as fallback, then custom
+            logger.notice("Got statusItem button")
+            // Try custom image first
             if let customImage = NSImage(named: "trackpad_on") {
+                logger.notice("Loaded custom image trackpad_on")
                 button.image = customImage
                 button.image?.isTemplate = true
+            } else if let sysImage = NSImage(systemSymbolName: "hand.point.up.fill",
+                                              accessibilityDescription: "Trackpad") {
+                // Fallback to system image
+                logger.notice("Using system symbol fallback")
+                button.image = sysImage
             } else {
-                // Fallback to system image if custom fails
-                button.image = NSImage(systemSymbolName: "hand.point.up.fill", accessibilityDescription: "Trackpad")
+                // Ultimate fallback - just use text
+                logger.warning("No image available, using text title")
+                button.title = "TP"
             }
+        } else {
+            logger.error("statusItem.button is nil!")
         }
 
         let menu = NSMenu()
@@ -87,6 +102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
         statusItem?.menu = menu
+        logger.notice("Menu configured")
     }
 
     // MARK: - Control Strip Setup

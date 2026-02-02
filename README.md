@@ -91,8 +91,13 @@ The app uses CGEventTap to intercept and block trackpad events at the Core Graph
 - Is fully reversible
 - Survives sleep/wake cycles (with automatic re-enable on timeout)
 - Works on all recent macOS versions
+- Distinguishes trackpad from external mouse using event characteristics
 
-When the trackpad is "disabled", a CGEventTap intercepts all mouse/trackpad events and blocks them by returning `nil` from the callback.
+When the trackpad is "disabled", a CGEventTap intercepts pointer events and filters them:
+- **Trackpad events** (continuous scroll, pressure-sensitive, gesture phases) are blocked
+- **External mouse events** (discrete scroll, no pressure) pass through normally
+
+The detection uses multiple heuristics: scroll phase/momentum (trackpad-only), continuous vs discrete scrolling, pressure sensitivity, and event subtypes.
 
 ## Troubleshooting
 
@@ -115,10 +120,11 @@ When the trackpad is "disabled", a CGEventTap intercepts all mouse/trackpad even
 
 ## Known Limitations
 
-- Uses private Apple APIs (DFRFoundation) - may break with macOS updates
-- Cannot distinguish between built-in trackpad and external mouse (disables all pointer input)
-- Not compatible with Mac App Store distribution due to private API usage
-- Only one Control Strip item per app is supported
+- **Private API fragility**: Uses private DFRFoundation APIs for Touch Bar Control Strip integration. These have no stability guarantee and may break with macOS updates. Monitor after system updates.
+- **Event filtering heuristics**: Trackpad vs mouse detection relies on event characteristics (scroll phases, pressure, etc.) which may not be 100% accurate for all devices
+- **Not Mac App Store compatible**: Private API usage prevents App Store distribution
+- **Single Control Strip item**: Only one item per app is supported by the private APIs
+- **Accessibility permission required**: The app needs Accessibility access to create event taps
 
 ## License
 
