@@ -43,7 +43,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logger.notice("applicationDidFinishLaunching started")
 
         setupStatusBarMenu()
-        logger.notice("setupStatusBarMenu completed, statusItem = \(String(describing: self.statusItem), privacy: .public)")
+        let statusDesc = String(describing: self.statusItem)
+        logger.notice("setupStatusBarMenu completed, statusItem = \(statusDesc, privacy: .public)")
         setupControlStrip()
         setupTrackpadStateCallback()
 

@@ -139,6 +139,7 @@ trackpadToggle/
 ├── trackpadToggle.xcodeproj/
 │   └── project.pbxproj
 ├── trackpadToggle/
+│   ├── main.swift                # App entry point
 │   ├── AppDelegate.swift         # Main app delegate with Touch Bar setup
 │   ├── TrackpadController.swift  # CGEventTap-based trackpad control
 │   ├── PrivateTouchBar.h         # Bridging header for private APIs
